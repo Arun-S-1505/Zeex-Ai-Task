@@ -1,0 +1,720 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// RBAC: Users, Roles, Permissions
+// ============================================================
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  firstName     String   @map("first_name")
+  lastName      String   @map("last_name")
+  phone         String?
+  avatar        String?
+  roleId        String   @map("role_id") @db.Uuid
+  siteId        String?  @map("site_id") @db.Uuid
+  isActive      Boolean  @default(true) @map("is_active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  refreshToken  String?  @map("refresh_token")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  role          Role     @relation(fields: [roleId], references: [id])
+  site          Site?    @relation(fields: [siteId], references: [id])
+
+  assignedAlerts     Alert[]          @relation("AssignedAlerts")
+  alertActions       AlertAction[]
+  auditLogs          AuditLog[]
+  notificationsReceived Notification[] @relation("NotificationRecipient")
+  shiftHandoversOut  ShiftHandover[]  @relation("OutgoingOperator")
+  shiftHandoversIn   ShiftHandover[]  @relation("IncomingOperator")
+  evidenceAccess     EvidenceAccessLog[]
+
+  @@map("users")
+  @@index([email])
+  @@index([roleId])
+  @@index([siteId])
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  roles       RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================================
+// Sites, Zones, Cameras
+// ============================================================
+
+model Site {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  code         String   @unique
+  address      String?
+  city         String?
+  state        String?
+  country      String?
+  latitude     Float?
+  longitude    Float?
+  timezone     String   @default("UTC")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  users        User[]
+  zones        Zone[]
+  cameras      Camera[]
+  workFronts   WorkFront[]
+  alerts       Alert[]
+  shifts       Shift[]
+
+  @@map("sites")
+  @@index([code])
+}
+
+model Zone {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  code         String   @unique
+  siteId       String   @map("site_id") @db.Uuid
+  zoneType     String   @default("general") @map("zone_type")
+  polygon      Json?
+  calibration  Json?
+  riskLevel    String   @default("medium") @map("risk_level")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  site         Site     @relation(fields: [siteId], references: [id])
+  cameras      Camera[]
+  workFronts   WorkFront[]
+  alerts       Alert[]
+  ruleInstances RuleInstance[]
+
+  @@map("zones")
+  @@index([siteId])
+  @@index([code])
+}
+
+model Camera {
+  id              String   @id @default(uuid()) @db.Uuid
+  cameraCode      String   @unique @map("camera_code")
+  name            String
+  ipAddress       String?  @map("ip_address")
+  rtspUrl         String?  @map("rtsp_url")
+  rtspPassword    String?  @map("rtsp_password")
+  cameraType      String   @default("fixed") @map("camera_type")
+  manufacturer    String?
+  model           String?
+  siteId          String   @map("site_id") @db.Uuid
+  zoneId          String?  @map("zone_id") @db.Uuid
+  workFrontId     String?  @map("work_front_id") @db.Uuid
+  status          String   @default("offline")
+  recordingStatus String   @default("inactive") @map("recording_status")
+  fps             Float?
+  bitrate         Float?
+  lastFrameAt     DateTime? @map("last_frame_at")
+  networkLatency  Float?   @map("network_latency")
+  tamperingStatus String   @default("normal") @map("tampering_status")
+  calibrationData Json?    @map("calibration_data")
+  resolution      String?
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  site            Site      @relation(fields: [siteId], references: [id])
+  zone            Zone?     @relation(fields: [zoneId], references: [id])
+  workFront       WorkFront? @relation(fields: [workFrontId], references: [id])
+  alerts          Alert[]
+  deployments     CameraDeployment[]
+  ruleInstances   RuleInstance[]
+
+  @@map("cameras")
+  @@index([siteId])
+  @@index([zoneId])
+  @@index([status])
+  @@index([cameraCode])
+}
+
+model CameraDeployment {
+  id          String   @id @default(uuid()) @db.Uuid
+  cameraId    String   @map("camera_id") @db.Uuid
+  zoneId      String?  @map("zone_id") @db.Uuid
+  workFrontId String?  @map("work_front_id") @db.Uuid
+  action      String
+  performedBy String?  @map("performed_by")
+  notes       String?
+  deployedAt  DateTime @default(now()) @map("deployed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  camera      Camera   @relation(fields: [cameraId], references: [id])
+
+  @@map("camera_deployments")
+  @@index([cameraId])
+}
+
+// ============================================================
+// Contractors and Work Fronts
+// ============================================================
+
+model Contractor {
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  code               String   @unique
+  contactPerson      String?  @map("contact_person")
+  contactEmail       String?  @map("contact_email")
+  contactPhone       String?  @map("contact_phone")
+  address            String?
+  registrationNumber String?  @map("registration_number")
+  safetyRating       Float?   @map("safety_rating")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  workFrontAssignments ContractorWorkFront[]
+  alerts               Alert[]
+
+  @@map("contractors")
+  @@index([code])
+}
+
+model WorkFront {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  code         String   @unique
+  siteId       String   @map("site_id") @db.Uuid
+  zoneId       String?  @map("zone_id") @db.Uuid
+  description  String?
+  activity     String?
+  status       String   @default("active")
+  startDate    DateTime? @map("start_date")
+  endDate      DateTime? @map("end_date")
+  shiftPattern String?  @map("shift_pattern")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  site         Site     @relation(fields: [siteId], references: [id])
+  zone         Zone?    @relation(fields: [zoneId], references: [id])
+  cameras      Camera[]
+  contractorAssignments ContractorWorkFront[]
+  alerts       Alert[]
+
+  @@map("work_fronts")
+  @@index([siteId])
+  @@index([zoneId])
+  @@index([code])
+}
+
+model ContractorWorkFront {
+  id           String   @id @default(uuid()) @db.Uuid
+  contractorId String   @map("contractor_id") @db.Uuid
+  workFrontId  String   @map("work_front_id") @db.Uuid
+  startDate    DateTime @map("start_date")
+  endDate      DateTime? @map("end_date")
+  shiftId      String?  @map("shift_id") @db.Uuid
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  contractor   Contractor @relation(fields: [contractorId], references: [id])
+  workFront    WorkFront  @relation(fields: [workFrontId], references: [id])
+
+  @@map("contractor_work_fronts")
+  @@index([contractorId])
+  @@index([workFrontId])
+  @@unique([contractorId, workFrontId, startDate])
+}
+
+// ============================================================
+// Detection Definitions and Rules
+// ============================================================
+
+model DetectionDefinition {
+  id                 String   @id @default(uuid()) @db.Uuid
+  detectionCode      String   @unique @map("detection_code")
+  name               String
+  description        String?
+  procedureReference String?  @map("procedure_reference")
+  tier               Int      @default(1)
+  primitives         Json?
+  confidenceThreshold Float   @default(0.85) @map("confidence_threshold")
+  persistenceDuration Int     @default(3) @map("persistence_duration")
+  cooldownPeriod      Int     @default(60) @map("cooldown_period")
+  severity           String   @default("medium")
+  escalationConfig   Json?    @map("escalation_config")
+  modelVersionId     String?  @map("model_version_id") @db.Uuid
+  isActive           Boolean  @default(true) @map("is_active")
+  category           String?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  modelVersion       ModelVersion? @relation(fields: [modelVersionId], references: [id])
+  ruleInstances      RuleInstance[]
+  alerts             Alert[]
+
+  @@map("detection_definitions")
+  @@index([detectionCode])
+  @@index([category])
+  @@index([isActive])
+}
+
+model RuleInstance {
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  detectionId        String   @map("detection_id") @db.Uuid
+  cameraId           String?  @map("camera_id") @db.Uuid
+  zoneId             String?  @map("zone_id") @db.Uuid
+  workFrontId        String?  @map("work_front_id") @db.Uuid
+  confidenceOverride Float?   @map("confidence_override")
+  persistenceOverride Int?    @map("persistence_override")
+  cooldownOverride   Int?     @map("cooldown_override")
+  severityOverride   String?  @map("severity_override")
+  timeRestrictions   Json?    @map("time_restrictions")
+  isActive           Boolean  @default(true) @map("is_active")
+  version            Int      @default(1)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  detection          DetectionDefinition @relation(fields: [detectionId], references: [id])
+  camera             Camera? @relation(fields: [cameraId], references: [id])
+  zone               Zone?   @relation(fields: [zoneId], references: [id])
+
+  @@map("rule_instances")
+  @@index([detectionId])
+  @@index([cameraId])
+  @@index([zoneId])
+  @@index([isActive])
+}
+
+model ModelVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  modelName   String   @map("model_name")
+  version     String
+  description String?
+  metrics     Json?
+  isActive    Boolean  @default(true) @map("is_active")
+  promotedAt  DateTime? @map("promoted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  detections  DetectionDefinition[]
+
+  @@unique([modelName, version])
+  @@map("model_versions")
+}
+
+// ============================================================
+// Alerts and Evidence
+// ============================================================
+
+model Alert {
+  id              String   @id @default(uuid()) @db.Uuid
+  alertCode       String   @unique @map("alert_code")
+  detectionId     String   @map("detection_id") @db.Uuid
+  cameraId        String   @map("camera_id") @db.Uuid
+  siteId          String   @map("site_id") @db.Uuid
+  zoneId          String?  @map("zone_id") @db.Uuid
+  workFrontId     String?  @map("work_front_id") @db.Uuid
+  contractorId    String?  @map("contractor_id") @db.Uuid
+  title           String
+  description     String?
+  severity        String
+  confidence      Float
+  status          String   @default("candidate")
+  occurredAt      DateTime @map("occurred_at")
+  raisedAt        DateTime? @map("raised_at")
+  acknowledgedAt  DateTime? @map("acknowledged_at")
+  assignedAt      DateTime? @map("assigned_at")
+  closedAt        DateTime? @map("closed_at")
+  assignedUserId  String?  @map("assigned_user_id") @db.Uuid
+  modelVersion    String?  @map("model_version")
+  ruleVersion     Int?     @map("rule_version")
+  trackId         String?  @map("track_id")
+  boundingBox     Json?    @map("bounding_box")
+  attributes      Json?
+  eventId         String?  @unique @map("event_id") @db.Uuid
+  slaDeadline     DateTime? @map("sla_deadline")
+  closureRemarks  String?  @map("closure_remarks")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  detection       DetectionDefinition @relation(fields: [detectionId], references: [id])
+  camera          Camera   @relation(fields: [cameraId], references: [id])
+  site            Site     @relation(fields: [siteId], references: [id])
+  zone            Zone?    @relation(fields: [zoneId], references: [id])
+  workFront       WorkFront? @relation(fields: [workFrontId], references: [id])
+  contractor      Contractor? @relation(fields: [contractorId], references: [id])
+  assignedUser    User?    @relation("AssignedAlerts", fields: [assignedUserId], references: [id])
+  evidence        Evidence[]
+  actions         AlertAction[]
+  escalations     Escalation[]
+  notifications   Notification[]
+
+  @@map("alerts")
+  @@index([status])
+  @@index([severity])
+  @@index([siteId])
+  @@index([cameraId])
+  @@index([detectionId])
+  @@index([contractorId])
+  @@index([occurredAt])
+  @@index([assignedUserId])
+  @@index([alertCode])
+}
+
+model AlertAction {
+  id            String   @id @default(uuid()) @db.Uuid
+  alertId       String   @map("alert_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid
+  previousStatus String  @map("previous_status")
+  newStatus     String   @map("new_status")
+  remarks       String?
+  evidenceIds   Json?    @map("evidence_ids")
+  ipAddress     String?  @map("ip_address")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  alert         Alert    @relation(fields: [alertId], references: [id])
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@map("alert_actions")
+  @@index([alertId])
+  @@index([userId])
+}
+
+model Evidence {
+  id            String   @id @default(uuid()) @db.Uuid
+  alertId       String?  @map("alert_id") @db.Uuid
+  type          String
+  fileName      String   @map("file_name")
+  filePath      String   @map("file_path")
+  fileSize      Int      @map("file_size")
+  mimeType      String   @map("mime_type")
+  hash          String?
+  retentionClass String  @default("standard") @map("retention_class")
+  legalHold     Boolean  @default(false) @map("legal_hold")
+  metadata      Json?
+  uploadedBy    String?  @map("uploaded_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  alert         Alert?   @relation(fields: [alertId], references: [id])
+  accessLogs    EvidenceAccessLog[]
+
+  @@map("evidence")
+  @@index([alertId])
+  @@index([type])
+}
+
+model EvidenceAccessLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  evidenceId  String   @map("evidence_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  action      String
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  evidence    Evidence @relation(fields: [evidenceId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("evidence_access_logs")
+  @@index([evidenceId])
+  @@index([userId])
+}
+
+// ============================================================
+// Escalations and Notifications
+// ============================================================
+
+model Escalation {
+  id          String   @id @default(uuid()) @db.Uuid
+  alertId     String   @map("alert_id") @db.Uuid
+  level       Int      @default(1)
+  escalatedTo String?  @map("escalated_to")
+  reason      String?
+  status      String   @default("active")
+  escalatedAt DateTime @default(now()) @map("escalated_at")
+  resolvedAt  DateTime? @map("resolved_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  alert       Alert    @relation(fields: [alertId], references: [id])
+
+  @@map("escalations")
+  @@index([alertId])
+}
+
+model Notification {
+  id           String   @id @default(uuid()) @db.Uuid
+  recipientId  String   @map("recipient_id") @db.Uuid
+  alertId      String?  @map("alert_id") @db.Uuid
+  type         String
+  title        String
+  message      String
+  channel      String   @default("in_app")
+  isRead       Boolean  @default(false) @map("is_read")
+  readAt       DateTime? @map("read_at")
+  deliveryStatus String @default("pending") @map("delivery_status")
+  retryCount   Int      @default(0) @map("retry_count")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  recipient    User     @relation("NotificationRecipient", fields: [recipientId], references: [id])
+  alert        Alert?   @relation(fields: [alertId], references: [id])
+
+  @@map("notifications")
+  @@index([recipientId])
+  @@index([alertId])
+  @@index([isRead])
+  @@index([deliveryStatus])
+}
+
+// ============================================================
+// Shifts and Handovers
+// ============================================================
+
+model Shift {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  siteId    String   @map("site_id") @db.Uuid
+  startTime String   @map("start_time")
+  endTime   String   @map("end_time")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  site      Site     @relation(fields: [siteId], references: [id])
+  handovers ShiftHandover[]
+
+  @@map("shifts")
+  @@index([siteId])
+}
+
+model ShiftHandover {
+  id             String   @id @default(uuid()) @db.Uuid
+  shiftId        String   @map("shift_id") @db.Uuid
+  outgoingUserId String   @map("outgoing_user_id") @db.Uuid
+  incomingUserId String?  @map("incoming_user_id") @db.Uuid
+  openAlerts     Json?    @map("open_alerts")
+  unresolvedFaults Json?  @map("unresolved_faults")
+  cameraRelocations Json? @map("camera_relocations")
+  notes          String?
+  status         String   @default("pending")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  shift          Shift    @relation(fields: [shiftId], references: [id])
+  outgoingUser   User     @relation("OutgoingOperator", fields: [outgoingUserId], references: [id])
+  incomingUser   User?    @relation("IncomingOperator", fields: [incomingUserId], references: [id])
+
+  @@map("shift_handovers")
+  @@index([shiftId])
+  @@index([outgoingUserId])
+}
+
+// ============================================================
+// Reports
+// ============================================================
+
+model Report {
+  id           String   @id @default(uuid()) @db.Uuid
+  title        String
+  type         String
+  format       String   @default("pdf")
+  status       String   @default("pending")
+  filters      Json?
+  filePath     String?  @map("file_path")
+  fileSize     Int?     @map("file_size")
+  generatedBy  String?  @map("generated_by") @db.Uuid
+  scheduleCron String?  @map("schedule_cron")
+  recipients   Json?
+  templateVersion Int   @default(1) @map("template_version")
+  generatedAt  DateTime? @map("generated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("reports")
+  @@index([type])
+  @@index([status])
+}
+
+// ============================================================
+// System Health and Fault Tickets
+// ============================================================
+
+model FaultTicket {
+  id          String   @id @default(uuid()) @db.Uuid
+  ticketCode  String   @unique @map("ticket_code")
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  title       String
+  description String?
+  severity    String   @default("medium")
+  status      String   @default("open")
+  assignedTo  String?  @map("assigned_to")
+  resolvedAt  DateTime? @map("resolved_at")
+  closedAt    DateTime? @map("closed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("fault_tickets")
+  @@index([status])
+  @@index([entityType])
+  @@index([ticketCode])
+}
+
+// ============================================================
+// Audit Logs
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  beforeState Json?    @map("before_state")
+  afterState  Json?    @map("after_state")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+  @@index([userId])
+  @@index([entityType])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================================
+// Training, Acceptance, and Person Tracking
+// ============================================================
+
+model PersonTrack {
+  id          String   @id @default(uuid()) @db.Uuid
+  trackId     String   @unique @map("track_id")
+  cameraId    String?  @map("camera_id")
+  siteId      String?  @map("site_id")
+  firstSeen   DateTime @map("first_seen")
+  lastSeen    DateTime @map("last_seen")
+  attributes  Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("person_tracks")
+  @@index([trackId])
+  @@index([cameraId])
+}
+
+model GroundTruthLabel {
+  id          String   @id @default(uuid()) @db.Uuid
+  alertId     String?  @map("alert_id")
+  detectionCode String @map("detection_code")
+  isCorrect   Boolean  @map("is_correct")
+  labeledBy   String?  @map("labeled_by")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("ground_truth_labels")
+  @@index([detectionCode])
+}
+
+model TrainingSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  description String?
+  modelName   String   @map("model_name")
+  datasetInfo Json?    @map("dataset_info")
+  status      String   @default("pending")
+  metrics     Json?
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("training_sessions")
+  @@index([status])
+}
+
+model AcceptanceRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  metricName  String   @map("metric_name")
+  metricValue Float    @map("metric_value")
+  target      Float?
+  unit        String?
+  category    String?
+  status      String   @default("pending")
+  measuredAt  DateTime @map("measured_at")
+  signedOffBy String?  @map("signed_off_by")
+  signedOffAt DateTime? @map("signed_off_at")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("acceptance_records")
+  @@index([metricName])
+  @@index([category])
+  @@index([measuredAt])
+}
+
+model InstallationMeasurement {
+  id          String   @id @default(uuid()) @db.Uuid
+  metricName  String   @map("metric_name")
+  metricValue Float    @map("metric_value")
+  unit        String?
+  source      String?
+  measuredAt  DateTime @map("measured_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("installation_measurements")
+  @@index([metricName])
+  @@index([measuredAt])
+}
+
